@@ -7,7 +7,7 @@ pub struct TestType {
 }
 
 #[tokio::test]
-async fn test_same_fn() {
+async fn test_same_fn_stream() {
     env_logger::builder()
         .filter_level(log::LevelFilter::Info)
         .init();
@@ -18,10 +18,12 @@ async fn test_same_fn() {
 
     setup(client.clone(), "test_stream_1").await;
 
+    println!("BEFORE QUERY");
     let all_rows = client
         .query_collect::<TestType>("SELECT val FROM test_stream_1 ORDER BY val DESC;")
         .await
         .unwrap();
+    println!("AFTER QUERY");
 
     assert!(all_rows[0].val == 54321);
     assert!(all_rows[1].val == 12345);
@@ -31,15 +33,16 @@ async fn test_same_fn() {
 }
 
 #[tokio::test]
-async fn test_separate_function() {
+async fn test_sep_fn_stream() {
     let client = Client::connect("127.0.0.1:9000", ClientOptions::default())
         .await
         .unwrap();
 
     setup(client.clone(), "test_stream_2").await;
+    let mut stream = get_stream_create_client().await;
 
     let mut all_rows: Vec<TestType> = Vec::new();
-    while let Some(res) = get_client_stream().await.next().await {
+    while let Some(res) = stream.next().await {
         all_rows.push(res.unwrap());
     }
 
@@ -50,7 +53,9 @@ async fn test_separate_function() {
     teardown(client, "test_stream_2").await;
 }
 
-async fn get_client_stream() -> impl Stream<Item = Result<TestType, klickhouse::KlickhouseError>> {
+async fn get_stream_create_client(
+) -> impl Stream<Item = Result<TestType, klickhouse::KlickhouseError>> {
+    println!("BEFORE QUERY");
     let client = Client::connect("127.0.0.1:9000", ClientOptions::default())
         .await
         .unwrap();
@@ -59,12 +64,47 @@ async fn get_client_stream() -> impl Stream<Item = Result<TestType, klickhouse::
         .query::<TestType>("SELECT val FROM test_stream_2 ORDER BY val DESC;")
         .await
         .unwrap();
+    println!("AFTER QUERY");
+
+    return all_rows;
+}
+
+#[tokio::test]
+async fn test_sep_fn_stream_pass_client() {
+    let client = Client::connect("127.0.0.1:9000", ClientOptions::default())
+        .await
+        .unwrap();
+
+    setup(client.clone(), "test_stream_3").await;
+    let mut stream = get_stream_from_client(client.clone()).await;
+
+    let mut all_rows: Vec<TestType> = Vec::new();
+    while let Some(res) = stream.next().await {
+        all_rows.push(res.unwrap());
+    }
+
+    assert!(all_rows[0].val == 54321);
+    assert!(all_rows[1].val == 12345);
+    assert!(all_rows[2].val == 11111);
+
+    teardown(client, "test_stream_3").await;
+}
+
+async fn get_stream_from_client(
+    client: Client,
+) -> impl Stream<Item = Result<TestType, klickhouse::KlickhouseError>> {
+    println!("BEFORE QUERY");
+    let all_rows = client
+        .query::<TestType>("SELECT val FROM test_stream_3 ORDER BY val DESC;")
+        .await
+        .unwrap();
+    println!("AFTER QUERY");
 
     return all_rows;
 }
 
 async fn setup(client: Client, table_name: &str) {
-    println!("begin cleanup into {}", table_name);
+    println!("begin setup for {}", table_name);
 
     client
         .execute(format!("DROP TABLE IF EXISTS {};", table_name))
