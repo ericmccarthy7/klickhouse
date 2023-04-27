@@ -12,39 +12,12 @@ async fn test_same_fn() {
         .filter_level(log::LevelFilter::Info)
         .init();
 
-    // SETUP
-    println!("begin insert into test_stream_1");
-
     let client = Client::connect("127.0.0.1:9000", ClientOptions::default())
         .await
         .unwrap();
 
-    client
-        .execute("DROP TABLE IF EXISTS test_stream_1;")
-        .await
-        .unwrap();
-    client
-        .execute("CREATE TABLE test_stream_1 (val UInt32) ENGINE=Memory;")
-        .await
-        .unwrap();
+    setup(client.clone(), "test_stream_1").await;
 
-    let mut block1 = TestType::default();
-    let mut block2 = TestType::default();
-    let mut block3 = TestType::default();
-
-    block1.val = 12345;
-    block2.val = 54321;
-    block3.val = 11111;
-
-    client
-        .insert_native_block(
-            "INSERT INTO test_stream_1 (val) FORMAT NATIVE",
-            vec![block1, block2, block3],
-        )
-        .await
-        .unwrap();
-
-    // TEST
     let all_rows = client
         .query_collect::<TestType>("SELECT val FROM test_stream_1 ORDER BY val DESC;")
         .await
@@ -54,50 +27,17 @@ async fn test_same_fn() {
     assert!(all_rows[1].val == 12345);
     assert!(all_rows[2].val == 11111);
 
-    // TEARDOWN
-    println!("begin cleanup of test_stream_1");
-
-    client
-        .execute("DROP TABLE IF EXISTS test_stream_1;")
-        .await
-        .unwrap();
+    teardown(client, "test_stream_1").await;
 }
 
 #[tokio::test]
 async fn test_separate_function() {
-    // SETUP
-    println!("begin cleanup into test_stream_2");
-
     let client = Client::connect("127.0.0.1:9000", ClientOptions::default())
         .await
         .unwrap();
 
-    client
-        .execute("DROP TABLE IF EXISTS test_stream_2;")
-        .await
-        .unwrap();
-    client
-        .execute("CREATE TABLE test_stream_2 (val UInt32) ENGINE=Memory;")
-        .await
-        .unwrap();
+    setup(client.clone(), "test_stream_2").await;
 
-    let mut block1 = TestType::default();
-    let mut block2 = TestType::default();
-    let mut block3 = TestType::default();
-
-    block1.val = 12345;
-    block2.val = 54321;
-    block3.val = 11111;
-
-    client
-        .insert_native_block(
-            "INSERT INTO test_stream_2 (val) FORMAT NATIVE",
-            vec![block1, block2, block3],
-        )
-        .await
-        .unwrap();
-
-    // TEST
     let mut all_rows: Vec<TestType> = Vec::new();
     while let Some(res) = get_client_stream().await.next().await {
         all_rows.push(res.unwrap());
@@ -107,13 +47,7 @@ async fn test_separate_function() {
     assert!(all_rows[1].val == 12345);
     assert!(all_rows[2].val == 11111);
 
-    // TEARDOWN
-    println!("begin cleanup of test_stream_2");
-
-    client
-        .execute("DROP TABLE IF EXISTS test_stream_2;")
-        .await
-        .unwrap();
+    teardown(client, "test_stream_2").await;
 }
 
 async fn get_client_stream() -> impl Stream<Item = Result<TestType, klickhouse::KlickhouseError>> {
@@ -127,4 +61,45 @@ async fn get_client_stream() -> impl Stream<Item = Result<TestType, klickhouse::
         .unwrap();
 
     return all_rows;
+}
+
+async fn setup(client: Client, table_name: &str) {
+    println!("begin cleanup into {}", table_name);
+
+    client
+        .execute(format!("DROP TABLE IF EXISTS {};", table_name))
+        .await
+        .unwrap();
+    client
+        .execute(format!(
+            "CREATE TABLE {} (val UInt32) ENGINE=Memory;",
+            table_name
+        ))
+        .await
+        .unwrap();
+
+    let mut block1 = TestType::default();
+    let mut block2 = TestType::default();
+    let mut block3 = TestType::default();
+
+    block1.val = 12345;
+    block2.val = 54321;
+    block3.val = 11111;
+
+    client
+        .insert_native_block(
+            format!("INSERT INTO {} (val) FORMAT NATIVE", table_name),
+            vec![block1, block2, block3],
+        )
+        .await
+        .unwrap();
+}
+
+async fn teardown(client: Client, table_name: &str) {
+    println!("begin cleanup of {}", table_name);
+
+    client
+        .execute(format!("DROP TABLE IF EXISTS {};", table_name))
+        .await
+        .unwrap();
 }
